@@ -70,9 +70,12 @@ export default function AdminDashboard() {
         ]);
         setStats(statsData);
         setUsers(usersData);
-      } catch (err) {
+      } 
+      catch (err) {
+        console.error(err); // logs the error so it counts as "used"
         setError('Failed to load admin data. Make sure you are logged in as an admin.');
-      } finally {
+      } 
+      finally {
         setLoading(false);
       }
     };
@@ -87,7 +90,9 @@ export default function AdminDashboard() {
       setUsers(prev =>
         prev.map(u => u.id === userId ? { ...u, is_active: result.is_active } : u)
       );
-    } catch (err) {
+    } 
+    catch (err) {
+      console.error(err); // logs the error so it counts as "used"
       alert('Failed to update user status.');
     }
   };
