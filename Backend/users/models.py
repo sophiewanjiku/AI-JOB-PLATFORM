@@ -62,3 +62,102 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
+    
+# Task model — represents a job posted by an admin on the marketplace
+class Task(models.Model):
+
+    # Job type choices
+    JOB_TYPE_CHOICES = [
+        ('fixed', 'Fixed Price'),
+        ('hourly', 'Hourly'),
+    ]
+
+    # Experience level choices
+    EXPERIENCE_CHOICES = [
+        ('entry', 'Entry Level'),
+        ('intermediate', 'Intermediate'),
+        ('expert', 'Expert'),
+    ]
+
+    # Project length choices
+    LENGTH_CHOICES = [
+        ('less_1_week', 'Less than 1 week'),
+        ('1_4_weeks', '1 to 4 weeks'),
+        ('1_3_months', '1 to 3 months'),
+        ('3_plus_months', '3+ months'),
+    ]
+
+    # Data type choices
+    DATA_TYPE_CHOICES = [
+        ('image', 'Image'),
+        ('text', 'Text'),
+        ('audio', 'Audio'),
+        ('video', 'Video'),
+        ('tabular', 'Tabular'),
+    ]
+
+    # Category choices
+    CATEGORY_CHOICES = [
+        ('labeling', 'Data Labeling'),
+        ('transcription', 'Transcription'),
+        ('verification', 'Verification'),
+        ('review', 'Dataset Review'),
+        ('annotation', 'Annotation'),
+    ]
+
+    # Core fields
+    title           = models.CharField(max_length=255)
+    description     = models.TextField()
+    category        = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
+    data_type       = models.CharField(max_length=50, choices=DATA_TYPE_CHOICES)
+    job_type        = models.CharField(max_length=20, choices=JOB_TYPE_CHOICES, default='fixed')
+    experience      = models.CharField(max_length=20, choices=EXPERIENCE_CHOICES, default='entry')
+    project_length  = models.CharField(max_length=20, choices=LENGTH_CHOICES, default='1_4_weeks')
+
+    # Compensation
+    budget          = models.DecimalField(max_digits=10, decimal_places=2)
+    hours_per_week  = models.IntegerField(null=True, blank=True)
+
+    # Skills stored as comma-separated string e.g. "Python,Annotation"
+    skills          = models.TextField(blank=True)
+
+    # Extra instructions from the admin
+    instructions    = models.TextField(blank=True)
+
+    # Visibility settings
+    is_published             = models.BooleanField(default=True)
+    allow_multiple           = models.BooleanField(default=False)
+    require_verification     = models.BooleanField(default=True)
+
+    # Who posted this task (admin user)
+    posted_by       = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='posted_tasks'
+    )
+
+    # Timestamps
+    created_at      = models.DateTimeField(auto_now_add=True)
+    updated_at      = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.title
+
+    # Helper to return skills as a list
+    def skills_list(self):
+        return [s.strip() for s in self.skills.split(',') if s.strip()]
+
+
+# Saved jobs — tracks which tasks a user has bookmarked
+class SavedTask(models.Model):
+    user    = models.ForeignKey(User, on_delete=models.CASCADE, related_name='saved_tasks')
+    task    = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='saved_by')
+    saved_at = models.DateTimeField(auto_now_add=True)
+
+    # Prevent duplicate saves
+    class Meta:
+        unique_together = ['user', 'task']
+
+    def __str__(self):
+        return f"{self.user.email} saved {self.task.title}"

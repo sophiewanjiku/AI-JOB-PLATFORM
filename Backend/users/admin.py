@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import User
+from .models import Task, SavedTask
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
@@ -29,3 +30,12 @@ class UserAdmin(BaseUserAdmin):
             'fields': ('email', 'full_name', 'phone_number', 'password1', 'password2'),
         }),
     )
+
+from .models import Task, SavedTask
+
+# Makes tasks manageable from the Django admin panel
+@admin.register(Task)
+class TaskAdmin(admin.ModelAdmin):
+    list_display  = ['title', 'category', 'budget', 'is_published', 'created_at']
+    search_fields = ['title', 'description']
+    list_filter   = ['category', 'is_published', 'experience', 'job_type']
