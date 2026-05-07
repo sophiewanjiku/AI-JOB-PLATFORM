@@ -2,6 +2,19 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import User
 from .models import Task, SavedTask
+from .models import PaymentMethod, Payout
+
+@admin.register(PaymentMethod)
+class PaymentMethodAdmin(admin.ModelAdmin):
+    # Note: phone number is encrypted so show account name instead
+    list_display = ['user', 'account_name', 'is_verified', 'created_at']
+    list_filter  = ['is_verified']
+
+@admin.register(Payout)
+class PayoutAdmin(admin.ModelAdmin):
+    list_display  = ['user', 'task', 'amount', 'status', 'accuracy_score', 'created_at']
+    list_filter   = ['status']
+    search_fields = ['user__email', 'task__title']
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
@@ -31,11 +44,21 @@ class UserAdmin(BaseUserAdmin):
         }),
     )
 
-from .models import Task, SavedTask
-
 # Makes tasks manageable from the Django admin panel
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
     list_display  = ['title', 'category', 'budget', 'is_published', 'created_at']
     search_fields = ['title', 'description']
     list_filter   = ['category', 'is_published', 'experience', 'job_type']
+
+@admin.register(PaymentMethod)
+class PaymentMethodAdmin(admin.ModelAdmin):
+    # Note: phone number is encrypted so show account name instead
+    list_display = ['user', 'account_name', 'is_verified', 'created_at']
+    list_filter  = ['is_verified']
+
+@admin.register(Payout)
+class PayoutAdmin(admin.ModelAdmin):
+    list_display  = ['user', 'task', 'amount', 'status', 'accuracy_score', 'created_at']
+    list_filter   = ['status']
+    search_fields = ['user__email', 'task__title']    

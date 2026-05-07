@@ -15,6 +15,30 @@ from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+import environ
+import os
+
+# Initialize django-environ
+env = environ.Env()
+
+# Read the .env file
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
+
+# Load credentials from .env
+SECRET_KEY = env('SECRET_KEY')
+DEBUG = env.bool('DEBUG', default=True)
+
+# M-Pesa settings — loaded from .env, never hardcoded
+MPESA_CONSUMER_KEY        = env('MPESA_CONSUMER_KEY')
+MPESA_CONSUMER_SECRET     = env('MPESA_CONSUMER_SECRET')
+MPESA_SHORTCODE           = env('MPESA_SHORTCODE')
+MPESA_PASSKEY             = env('MPESA_PASSKEY')
+MPESA_B2C_INITIATOR_NAME  = env('MPESA_B2C_INITIATOR_NAME')
+MPESA_B2C_SECURITY_CREDENTIAL = env('MPESA_B2C_SECURITY_CREDENTIAL')
+MPESA_CALLBACK_URL        = env('MPESA_CALLBACK_URL')
+
+# Encryption key for sensitive user payment data
+ENCRYPTION_KEY = env('ENCRYPTION_KEY')
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/

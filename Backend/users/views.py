@@ -12,6 +12,10 @@ from django.db import models as django_models
 from django.db.models import Q
 from .models import Task, SavedTask
 from .serializers import TaskSerializer
+from .mpesa import send_b2c_payment, get_access_token
+from .encryption import mask_phone
+from .models import PaymentMethod, Payout
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -271,4 +275,244 @@ class AdminTaskListView(APIView):
         # Admin sees all tasks, not just published ones
         tasks = Task.objects.all().order_by('-created_at')
         serializer = TaskSerializer(tasks, many=True)
-        return Response(serializer.data)    
+        return Response(serializer.data) 
+# ── USER: Connect M-Pesa account ──
+class ConnectMpesaView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        phone   = request.data.get('phone_number', '').strip()
+        name    = request.data.get('account_name', 'My M-Pesa')
+
+        # Basic phone validation — must start with 254 and be 12 digits
+        phone_clean = phone.replace('+', '').replace(' ', '')
+        if not phone_clean.startswith('254') or len(phone_clean) != 12:
+            return Response(
+                {'error': 'Enter a valid Kenyan number e.g. +254712345678'},
+                status=400
+            )
+
+        # Create or update the payment method for this user
+        pm, created = PaymentMethod.objects.get_or_create(user=request.user)
+        pm.phone_number = phone_clean  # Encrypted automatically by the setter
+        pm.account_name = name
+        pm.save()
+
+        return Response({
+            'message': 'M-Pesa account connected successfully',
+            'masked_phone': mask_phone(phone_clean),
+            'account_name': pm.account_name,
+        })
+
+    def get(self, request):
+        # Return the user's connected payment method (masked)
+        try:
+            pm = request.user.payment_method
+            return Response({
+                'connected': True,
+                'masked_phone': mask_phone(pm.phone_number),
+                'account_name': pm.account_name,
+                'is_verified': pm.is_verified,
+            })
+        except PaymentMethod.DoesNotExist:
+            return Response({'connected': False})
+
+
+# ── USER: View payout history ──
+class UserPayoutListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        payouts = Payout.objects.filter(
+            user=request.user
+        ).order_by('-created_at')
+
+        data = [{
+            'id':           p.id,
+            'task':         p.task.title,
+            'amount':       str(p.amount),
+            'status':       p.status,
+            'accuracy':     p.accuracy_score,
+            'created_at':   p.created_at,
+            'paid_at':      p.paid_at,
+            'mpesa_ref':    p.mpesa_transaction_id or None,
+        } for p in payouts]
+
+        # Summary totals for the stat cards
+        total_earned  = sum(float(p.amount) for p in payouts if p.status == 'paid')
+        pending_amount = sum(float(p.amount) for p in payouts if p.status in ['pending', 'approved', 'processing'])
+
+        return Response({
+            'payouts':        data,
+            'total_earned':   total_earned,
+            'pending_amount': pending_amount,
+        })
+
+
+# ── ADMIN: List all payouts with user payment details ──
+class AdminPayoutListView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        # Filter by status if provided
+        status_filter = request.query_params.get('status', None)
+        payouts = Payout.objects.select_related(
+            'user', 'task', 'user__payment_method'
+        ).order_by('-created_at')
+
+        if status_filter:
+            payouts = payouts.filter(status=status_filter)
+
+        data = []
+        for p in payouts:
+            # Get masked phone for display
+            try:
+                pm = p.user.payment_method
+                masked_phone  = mask_phone(pm.phone_number)
+                account_name  = pm.account_name
+                pm_verified   = pm.is_verified
+            except PaymentMethod.DoesNotExist:
+                masked_phone  = 'No payment method'
+                account_name  = '—'
+                pm_verified   = False
+
+            data.append({
+                'id':           p.id,
+                'user_id':      p.user.id,
+                'user_name':    p.user.full_name,
+                'user_email':   p.user.email,
+                'task':         p.task.title,
+                'task_id':      p.task.id,
+                'amount':       str(p.amount),
+                'status':       p.status,
+                'accuracy':     p.accuracy_score,
+                'masked_phone': masked_phone,
+                'account_name': account_name,
+                'pm_verified':  pm_verified,
+                'admin_notes':  p.admin_notes,
+                'created_at':   p.created_at,
+                'paid_at':      p.paid_at,
+            })
+
+        return Response(data)
+
+
+# ── ADMIN: Verify a submission and set accuracy score ──
+class AdminVerifyPayoutView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def patch(self, request, payout_id):
+        try:
+            payout = Payout.objects.get(id=payout_id)
+        except Payout.DoesNotExist:
+            return Response({'error': 'Payout not found'}, status=404)
+
+        action         = request.data.get('action')  # 'approve' or 'reject'
+        accuracy_score = request.data.get('accuracy_score')
+        admin_notes    = request.data.get('admin_notes', '')
+
+        payout.accuracy_score = accuracy_score
+        payout.admin_notes    = admin_notes
+
+        if action == 'approve':
+            # Mark as approved — ready for payout
+            payout.status = 'approved'
+        elif action == 'reject':
+            # Mark as rejected — worker will be notified
+            payout.status = 'rejected'
+        else:
+            return Response({'error': 'action must be approve or reject'}, status=400)
+
+        payout.save()
+        return Response({
+            'message': f'Payout {action}d successfully',
+            'status':  payout.status,
+        })
+
+
+# ── ADMIN: Send actual M-Pesa payment via Daraja B2C ──
+class AdminSendPayoutView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, payout_id):
+        try:
+            payout = Payout.objects.select_related(
+                'user__payment_method'
+            ).get(id=payout_id, status='approved')
+        except Payout.DoesNotExist:
+            return Response(
+                {'error': 'Payout not found or not yet approved'},
+                status=404
+            )
+
+        # Make sure the user has a connected M-Pesa account
+        try:
+            pm = payout.user.payment_method
+        except PaymentMethod.DoesNotExist:
+            return Response(
+                {'error': 'User has no connected M-Pesa account'},
+                status=400
+            )
+
+        try:
+            # Call Daraja B2C API to send the money
+            result = send_b2c_payment(
+                phone_number = pm.phone_number,  # Decrypted automatically
+                amount       = float(payout.amount),
+                remarks      = f'Taskr AI — {payout.task.title}'
+            )
+
+            # Save the Daraja conversation ID for tracking
+            payout.status                 = 'processing'
+            payout.mpesa_conversation_id  = result.get('ConversationID', '')
+            payout.save()
+
+            return Response({
+                'message':         'Payment initiated successfully',
+                'conversation_id': payout.mpesa_conversation_id,
+            })
+
+        except Exception as e:
+            # If Daraja call fails, mark as failed
+            payout.status = 'failed'
+            payout.save()
+            return Response({'error': str(e)}, status=500)
+
+
+# ── DARAJA CALLBACK: Receives payment confirmation from Safaricom ──
+class MpesaCallbackView(APIView):
+    # No auth — Safaricom calls this endpoint directly
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        # Daraja sends result data in this structure
+        body        = request.data.get('Result', {})
+        result_code = body.get('ResultCode')
+        conv_id     = body.get('ConversationID', '')
+
+        try:
+            # Find the payout by conversation ID
+            payout = Payout.objects.get(mpesa_conversation_id=conv_id)
+
+            if result_code == 0:
+                # Payment successful
+                payout.status = 'paid'
+                payout.paid_at = timezone.now()
+
+                # Extract transaction ID from result parameters
+                params = body.get('ResultParameters', {}).get('ResultParameter', [])
+                for param in params:
+                    if param.get('Key') == 'TransactionID':
+                        payout.mpesa_transaction_id = param.get('Value', '')
+
+            else:
+                # Payment failed
+                payout.status = 'failed'
+
+            payout.save()
+
+        except Payout.DoesNotExist:
+            pass  # Unknown conversation ID — ignore silently
+
+        # Daraja expects this exact response format
+        return Response({'ResultCode': 0, 'ResultDesc': 'Accepted'})       

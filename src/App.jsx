@@ -4,6 +4,8 @@ import Dashboard from './pages/Dashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import FindJobs from './pages/FindJobs';
 import UploadTask from './pages/UploadTask';
+import MpesaSetup from './pages/MpesaSetup';
+import Payouts from './pages/Payouts';
 
 // ── Protects routes that require login ──
 // If no access token exists in localStorage, redirect to /login
@@ -34,7 +36,9 @@ function App() {
         <Route path="/proposals"     element={<PrivateRoute><div className="p-8 text-gray-400">My Proposals — coming soon</div></PrivateRoute>} />
         <Route path="/completed"     element={<PrivateRoute><div className="p-8 text-gray-400">Completed Jobs — coming soon</div></PrivateRoute>} />
         <Route path="/invoices"      element={<PrivateRoute><div className="p-8 text-gray-400">Invoices & Reports — coming soon</div></PrivateRoute>} />
-        <Route path="/payouts"       element={<PrivateRoute><div className="p-8 text-gray-400">Manage Payouts — coming soon</div></PrivateRoute>} />
+        <Route path="/payouts" element={<PrivateRoute><Payouts /></PrivateRoute>} />
+        <Route path="/setup/mpesa" element={<PrivateRoute><MpesaSetup /></PrivateRoute>} />
+
         <Route path="/profile"       element={<PrivateRoute><div className="p-8 text-gray-400">My Profile — coming soon</div></PrivateRoute>} />
         {/* Admin routes — protected, only accessible when logged in */}
         <Route path="/admin/dashboard"    element={<PrivateRoute><AdminDashboard /></PrivateRoute>} />

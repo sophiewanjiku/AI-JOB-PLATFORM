@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { loginUser } from '../api/auth';
 import { useNavigate } from 'react-router-dom';
+import { getPaymentMethod } from '../api/payouts';
 
 export default function Login() {
   const [formData, setFormData] = useState({ email: '', password: '' });
@@ -27,8 +28,16 @@ export default function Login() {
       localStorage.setItem('refresh', data.refresh);
       localStorage.setItem('user', JSON.stringify(data.user)); // save user info for dashboard
       
-      navigate('/dashboard'); 
-      setMessage(`Welcome back, ${data.user.full_name}!`);
+// Check if user has connected their M-Pesa
+    const pmData = await getPaymentMethod();
+    if (!pmData.connected) {
+      // New user — send to setup page first
+      navigate('/setup/mpesa');
+    } else {
+      navigate('/dashboard');
+    }      
+    
+    setMessage(`Welcome back, ${data.user.full_name}!`);
 
       // TODO: redirect to dashboard after login
     } catch (err) {

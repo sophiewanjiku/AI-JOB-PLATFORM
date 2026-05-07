@@ -1,6 +1,7 @@
 # Import necessary Django modules for building a custom user model
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from .encryption import encrypt, decrypt
 
 
 # UserManager handles the logic for creating regular users and superusers
@@ -161,3 +162,77 @@ class SavedTask(models.Model):
 
     def __str__(self):
         return f"{self.user.email} saved {self.task.title}"
+    
+class PaymentMethod(models.Model):
+    """
+    Stores a user's connected M-Pesa payment details.
+    Phone number is encrypted at rest for security.
+    Each user can only have one payment method (OneToOne).
+    """
+    user            = models.OneToOneField(
+                        User,
+                        on_delete=models.CASCADE,
+                        related_name='payment_method'
+                    )
+
+    # Phone number stored encrypted — never plain text in DB
+    _phone_number   = models.CharField(max_length=500, db_column='phone_number')
+
+    # Display name e.g. "Jane's M-Pesa"
+    account_name    = models.CharField(max_length=100, blank=True)
+
+    # Whether the number has been confirmed working
+    is_verified     = models.BooleanField(default=False)
+
+    created_at      = models.DateTimeField(auto_now_add=True)
+    updated_at      = models.DateTimeField(auto_now=True)
+
+    # Property getter — decrypts phone on read
+    @property
+    def phone_number(self):
+        return decrypt(self._phone_number)
+
+    # Property setter — encrypts phone on write
+    @phone_number.setter
+    def phone_number(self, value):
+        self._phone_number = encrypt(value)
+
+    def __str__(self):
+        return f"{self.user.email} — M-Pesa"
+
+
+class Payout(models.Model):
+    """
+    Records every payout made or pending for a user.
+    Created automatically when admin approves a task submission.
+    """
+    STATUS_CHOICES = [
+        ('pending',   'Pending Verification'),  # Task submitted, not yet verified
+        ('approved',  'Awaiting Payout'),       # Admin verified, payout not sent yet
+        ('processing','Processing'),             # Daraja API call made
+        ('paid',      'Paid'),                  # Confirmed paid by Daraja callback
+        ('failed',    'Failed'),                # Daraja returned an error
+        ('rejected',  'Rejected'),              # Admin rejected the submission
+    ]
+
+    user            = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payouts')
+    task            = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='payouts')
+
+    amount          = models.DecimalField(max_digits=10, decimal_places=2)
+    status          = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    # Accuracy score set by admin during verification (0-100)
+    accuracy_score  = models.FloatField(null=True, blank=True)
+
+    # Daraja transaction reference — returned after B2C call
+    mpesa_conversation_id   = models.CharField(max_length=100, blank=True)
+    mpesa_transaction_id    = models.CharField(max_length=100, blank=True)
+
+    # Admin notes on the verification
+    admin_notes     = models.TextField(blank=True)
+
+    created_at      = models.DateTimeField(auto_now_add=True)
+    paid_at         = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.user.email} — {self.task.title} — {self.status}"
